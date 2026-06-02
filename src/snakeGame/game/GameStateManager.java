@@ -16,9 +16,8 @@ public class GameStateManager {
 
     }
 
-    public setState (GameState newState){
+    public void setState(GameState newState){
         currentState = newState;
-
     }
 
     public boolean isRunning(){

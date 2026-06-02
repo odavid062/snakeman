@@ -1,6 +1,9 @@
 package snakeGame.view;
 
 import snakeGame.controller.InputHandler;
+import snakeGame.game.GameStateManager;
+import snakeGame.game.GameStateManager.GameState;
+import snakeGame.game.ScoreManager;
 import snakeGame.model.Food;
 import snakeGame.model.Snake;
 
@@ -20,11 +23,11 @@ public class GamePanel extends JPanel implements ActionListener {
     Snake snake;
     Food food;
     Timer timer;
-    boolean running = false;
     int score = 0;
-    boolean paused = false;
-    boolean gameStarted = false;
-    int highScore = 0;
+
+    // MVC: estado do jogo e recorde persistente ficam em managers dedicados
+    private final GameStateManager stateManager = new GameStateManager();
+    private final ScoreManager scoreManager = new ScoreManager();
 
     JButton startButton;
 
@@ -37,20 +40,19 @@ public class GamePanel extends JPanel implements ActionListener {
         startButton.setFont(new Font("Ink Free", Font.BOLD, 30));
         startButton.setFocusable(false);
         startButton.setBounds(WIDTH / 2 - 150, HEIGHT / 2 - 50, 300, 100);
-
         startButton.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
                 startGame();
                 startButton.setVisible(false);
-                gameStarted = true;
             }
         });
 
         this.setLayout(null);
         this.add(startButton);
 
-        this.addKeyListener(new InputHandler(snake, this::togglePause, this::restartGame));
+        // Controller desacoplado: recebe a cobra via Supplier (sempre a atual) e callbacks
+        this.addKeyListener(new InputHandler(() -> snake, this::togglePause, this::restartGame));
     }
 
     public void startGame() {
@@ -60,13 +62,13 @@ public class GamePanel extends JPanel implements ActionListener {
 
         snake = new Snake(WIDTH, HEIGHT, UNIT_SIZE);
         food = new Food(WIDTH, HEIGHT, UNIT_SIZE);
-        running = true;
-        paused = false;
         score = 0;
         currentDelay = DELAY;
+        stateManager.setState(GameState.RUNNING);
 
         timer = new Timer(currentDelay, this);
         timer.start();
+        requestFocusInWindow();
     }
 
     @Override
@@ -76,29 +78,29 @@ public class GamePanel extends JPanel implements ActionListener {
     }
 
     public void draw(Graphics g) {
-        if (!gameStarted) {
+        if (stateManager.getCurrentState() == GameState.MENU) {
             return;
         }
 
-        if (running) {
-            food.draw(g, UNIT_SIZE);
-            snake.draw(g, UNIT_SIZE);
-
-            g.setColor(Color.white);
-            g.setFont(new Font("Ink Free", Font.BOLD, 30));
-            g.drawString("Pontuação: " + score, 10, 30);
-
-            g.setColor(Color.white);
-            g.setFont(new Font("Ink Free", Font.BOLD, 20));
-            g.drawString("Recorde: " + highScore, 10, 50);
-
-            if (paused) {
-                g.setColor(Color.yellow);
-                g.setFont(new Font("Ink Free", Font.BOLD, 40));
-                g.drawString("Jogo Pausado - Pressione P", 50, HEIGHT / 2);
-            }
-        } else {
+        if (stateManager.isGameOver()) {
             gameOver(g);
+            return;
+        }
+
+        food.draw(g, UNIT_SIZE);
+        snake.draw(g, UNIT_SIZE);
+
+        g.setColor(Color.white);
+        g.setFont(new Font("Ink Free", Font.BOLD, 30));
+        g.drawString("Pontuação: " + score, 10, 30);
+
+        g.setFont(new Font("Ink Free", Font.BOLD, 20));
+        g.drawString("Recorde: " + scoreManager.getHighScore(), 10, 50);
+
+        if (stateManager.isPaused()) {
+            g.setColor(Color.yellow);
+            g.setFont(new Font("Ink Free", Font.BOLD, 40));
+            g.drawString("Jogo Pausado - Pressione P", 50, HEIGHT / 2);
         }
     }
 
@@ -114,18 +116,14 @@ public class GamePanel extends JPanel implements ActionListener {
             snake.grow();
             food.spawn();
             score++;
-
-            if (score > highScore) {
-                highScore = score;
-            }
-
+            scoreManager.checkAndUpdateHighScore(score);
             adjustSpeed();
         }
     }
 
     public void checkCollisions() {
         if (snake.checkSelfCollision() || snake.checkWallCollision(WIDTH, HEIGHT)) {
-            running = false;
+            stateManager.setState(GameState.GAME_OVER);
             timer.stop();
         }
     }
@@ -140,16 +138,14 @@ public class GamePanel extends JPanel implements ActionListener {
 
         g.setColor(Color.white);
         g.setFont(new Font("Ink Free", Font.BOLD, 25));
-        g.drawString("Recorde: " + highScore, 150, HEIGHT / 2 + 80);
+        g.drawString("Recorde: " + scoreManager.getHighScore(), 150, HEIGHT / 2 + 80);
 
-        g.setColor(Color.white);
-        g.setFont(new Font("Ink Free", Font.BOLD, 25));
         g.drawString("Pressione R para jogar novamente", 120, HEIGHT / 2 + 110);
     }
 
     @Override
     public void actionPerformed(ActionEvent e) {
-        if (running && !paused) {
+        if (stateManager.isRunning()) {
             snake.move();
             checkFood();
             checkCollisions();
@@ -157,12 +153,18 @@ public class GamePanel extends JPanel implements ActionListener {
         repaint();
     }
 
+    /** Alterna entre RUNNING e PAUSED (tecla P). */
     public void togglePause() {
-        paused = !paused;
+        if (stateManager.isRunning()) {
+            stateManager.setState(GameState.PAUSED);
+        } else if (stateManager.isPaused()) {
+            stateManager.setState(GameState.RUNNING);
+        }
     }
 
+    /** Reinicia após game over (tecla R). */
     public void restartGame() {
-        if (!running && gameStarted) {
+        if (stateManager.isGameOver()) {
             startGame();
         }
     }
